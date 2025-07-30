@@ -1,4 +1,4 @@
-# modules/azure-vm/main.tf
+# modules/azure-storage-account/main.tf
 
 terraform {
   required_providers {
@@ -9,49 +9,47 @@ terraform {
   }
 }
 
-provider "azurerm" {
-  features {}
+resource "azurerm_storage_account" "storage" {
+  name                     = lower(replace("${var.name_prefix}${var.name_suffix}", "/[^a-z0-9]/", ""))
+  resource_group_name      = var.resource_group_name
+  location                 = var.location
+  account_tier             = var.account_tier
+  account_replication_type = var.account_replication_type
+  account_kind             = var.account_kind
+  access_tier              = var.access_tier
+  enable_https_traffic_only = var.https_traffic_only
+  min_tls_version          = var.min_tls_version
+  allow_nested_items_to_be_public = var.allow_blob_public_access
+
+  dynamic "network_rules" {
+    for_each = var.network_rules != null ? [var.network_rules] : []
+    content {
+      default_action             = network_rules.value.default_action
+      ip_rules                   = network_rules.value.ip_rules
+      virtual_network_subnet_ids = network_rules.value.virtual_network_subnet_ids
+      bypass                     = network_rules.value.bypass
+    }
+  }
+
+  blob_properties {
+    delete_retention_policy {
+      days = var.blob_retention_days
+    }
+    container_delete_retention_policy {
+      days = var.container_retention_days
+    }
+    versioning_enabled = var.blob_versioning_enabled
+    change_feed_enabled = var.change_feed_enabled
+  }
+
+  tags = merge(var.tags, {
+    environment = var.environment
+  })
 }
 
-resource "azurerm_windows_virtual_machine" "vm" {
-  count = var.create_vm ? 1 : 0
-
-  name                = var.vm_name
-  resource_group_name = var.resource_group_name
-  location            = var.location
-  size                = var.vm_size
-  admin_username      = var.admin_username
-  admin_password      = var.admin_password
-  network_interface_ids = [
-    azurerm_network_interface.vm_nic[0].id
-  ]
-
-  os_disk {
-    caching              = "ReadWrite"
-    storage_account_type = var.os_disk_type
-    disk_size_gb         = var.os_disk_size
-  }
-
-  source_image_reference {
-    publisher = var.image_publisher
-    offer     = var.image_offer
-    sku       = var.image_sku
-    version   = var.image_version
-  }
-
-  tags = var.tags
-}
-
-resource "azurerm_network_interface" "vm_nic" {
-  count = var.create_vm ? 1 : 0
-
-  name                = "${var.vm_name}-nic"
-  location            = var.location
-  resource_group_name = var.resource_group_name
-
-  ip_configuration {
-    name                          = "internal"
-    subnet_id                     = var.subnet_id
-    private_ip_address_allocation = "Dynamic"
-  }
+resource "azurerm_storage_container" "containers" {
+  for_each              = toset(var.containers)
+  name                  = each.key
+  storage_account_name  = azurerm_storage_account.storage.name
+  container_access_type = var.container_access_type
 }
